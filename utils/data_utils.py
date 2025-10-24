@@ -242,6 +242,11 @@ def detect_beta_columns(beta_df):
 def product_to_beta_column(product_name):
     """Convert a product name to its corresponding beta column format."""
     normalized = product_name.lower()
+    
+    # Special case: "Other Products" uses "Beta_Impressions"
+    if normalized == 'other products':
+        return 'Beta_Impressions'
+    
     return f"Beta_{normalized}_meta_impression"
 
 
