@@ -546,6 +546,11 @@ def main():
                 st.error("❌ No week columns found")
                 return
             selected_week = st.selectbox("📅 Select Week:", week_columns, key="week_select")
+            
+            # Clear optimization results if week changed
+            if st.session_state.get('selected_week') != selected_week:
+                st.session_state.optimization_result = None
+            
             st.session_state.selected_week = selected_week
         
         with col2:
@@ -561,42 +566,93 @@ def main():
         with col_btn1:
             run_btn = st.button("🚀 Run Optimization", type="primary", use_container_width=True, key="run_opt_btn")
         
-        # Budget Editor
-        st.markdown("### 💰 Edit Base Budgets")
+        # Budget and CPM Editor Side by Side
         master_df_temp = prepare_master_dataframe(
             data_files['budget'], data_files['cpm'],
             data_files['attribution'], data_files['price'], selected_week
         )
         
         if master_df_temp is not None:
-            # Create editable dataframe
-            if 'edited_budgets' not in st.session_state:
+            # Store original file values for reset functionality
+            if 'original_budgets' not in st.session_state or st.session_state.get('last_selected_week') != selected_week:
+                st.session_state.original_budgets = master_df_temp[['item_name', 'base_budget']].copy()
+            
+            if 'original_cpms' not in st.session_state or st.session_state.get('last_selected_week_cpm') != selected_week:
+                st.session_state.original_cpms = master_df_temp[['item_name', 'cpm']].copy()
+            
+            # Initialize session state for budgets and CPMs
+            if 'edited_budgets' not in st.session_state or st.session_state.get('last_selected_week') != selected_week:
                 st.session_state.edited_budgets = master_df_temp[['item_name', 'base_budget']].copy()
+                st.session_state.last_selected_week = selected_week
             
-            edited_df = st.data_editor(
-                st.session_state.edited_budgets,
-                column_config={
-                    "item_name": st.column_config.TextColumn("Product/Channel", disabled=True),
-                    "base_budget": st.column_config.NumberColumn("Base Budget ($)", min_value=0, format="$%.2f")
-                },
-                hide_index=True,
-                use_container_width=True,
-                key="budget_editor"
-            )
+            if 'edited_cpms' not in st.session_state or st.session_state.get('last_selected_week_cpm') != selected_week:
+                st.session_state.edited_cpms = master_df_temp[['item_name', 'cpm']].copy()
+                st.session_state.last_selected_week_cpm = selected_week
             
-            col1, col2, col3 = st.columns([1, 1, 2])
-            with col1:
-                if st.button("💾 Save Changes", use_container_width=True):
-                    st.session_state.edited_budgets = edited_df.copy()
-                    st.success("✅ Budget changes saved!")
-            with col2:
-                if st.button("🔄 Reset to File", use_container_width=True):
-                    st.session_state.edited_budgets = master_df_temp[['item_name', 'base_budget']].copy()
-                    st.success("✅ Reset to original values!")
-                    st.rerun()
-            with col3:
+            # Create two columns for side-by-side editors
+            col_budget, col_cpm = st.columns(2)
+            
+            # Budget Editor (Left Column)
+            with col_budget:
+                st.markdown("### 💰 Edit Base Budgets")
+                
+                edited_df = st.data_editor(
+                    st.session_state.edited_budgets,
+                    column_config={
+                        "item_name": st.column_config.TextColumn("Product/Channel", disabled=True),
+                        "base_budget": st.column_config.NumberColumn("Base Budget ($)", min_value=0, format="$%.2f")
+                    },
+                    hide_index=True,
+                    use_container_width=True,
+                    key="budget_editor"
+                )
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("💾 Save", use_container_width=True, key="save_budgets"):
+                        st.session_state.edited_budgets = edited_df.copy()
+                        st.success("✅ Budget changes saved!")
+                        st.rerun()
+                with col2:
+                    if st.button("🔄 Reset", use_container_width=True, key="reset_budgets"):
+                        st.session_state.edited_budgets = st.session_state.original_budgets.copy()
+                        st.session_state.optimization_result = None
+                        st.success("✅ Budget reset to file values!")
+                        st.rerun()
+                
                 total_budget = edited_df['base_budget'].sum()
                 st.metric("Total Budget", f"${total_budget:,.2f}")
+            
+            # CPM Editor (Right Column)
+            with col_cpm:
+                st.markdown("### 📊 Edit CPM Values")
+                
+                edited_cpm_df = st.data_editor(
+                    st.session_state.edited_cpms,
+                    column_config={
+                        "item_name": st.column_config.TextColumn("Product/Channel", disabled=True),
+                        "cpm": st.column_config.NumberColumn("CPM ($)", min_value=0.01, format="$%.2f")
+                    },
+                    hide_index=True,
+                    use_container_width=True,
+                    key="cpm_editor"
+                )
+                
+                col1_cpm, col2_cpm = st.columns(2)
+                with col1_cpm:
+                    if st.button("💾 Save", use_container_width=True, key="save_cpms"):
+                        st.session_state.edited_cpms = edited_cpm_df.copy()
+                        st.success("✅ CPM changes saved!")
+                        st.rerun()
+                with col2_cpm:
+                    if st.button("🔄 Reset", use_container_width=True, key="reset_cpms"):
+                        st.session_state.edited_cpms = st.session_state.original_cpms.copy()
+                        st.session_state.optimization_result = None
+                        st.success("✅ CPM reset to file values!")
+                        st.rerun()
+                
+                avg_cpm = edited_cpm_df['cpm'].mean()
+                st.metric("Average CPM", f"${avg_cpm:,.2f}")
         
         # Expanders for advanced details (HIDDEN)
         if False:  # Hidden expander
@@ -1160,7 +1216,7 @@ def main():
         
         if run_btn:
             # Run optimization and store in session state
-            with st.spinner("Optimizing for maximum volume..."):
+            with st.spinner("Optimizing for maximum revenue..."):
                 master_df_temp = prepare_master_dataframe(
                     data_files['budget'], data_files['cpm'],
                     data_files['attribution'], data_files['price'], selected_week
@@ -1174,6 +1230,14 @@ def main():
                             item_name = row['item_name']
                             new_budget = row['base_budget']
                             master_df_temp.loc[master_df_temp['item_name'] == item_name, 'base_budget'] = new_budget
+                    
+                    # Use edited CPMs if available
+                    if 'edited_cpms' in st.session_state:
+                        # Update master_df with edited CPMs
+                        for idx, row in st.session_state.edited_cpms.iterrows():
+                            item_name = row['item_name']
+                            new_cpm = row['cpm']
+                            master_df_temp.loc[master_df_temp['item_name'] == item_name, 'cpm'] = new_cpm
                     
                     google_trends_value, message, _, _ = get_google_trends_value(data_files.get('google_trends'), selected_week)
                     result_temp = run_optimization(master_df_temp, data_files['beta'], constraint_pct, google_trends_value, data_files.get('modeling_data'))
@@ -1199,22 +1263,33 @@ def main():
         # Get results from session state
         result = st.session_state.optimization_result
         
-        st.info("🎯 **Optimization Objective:** Budgets were optimized to maximize total volume (not revenue)")
+        st.info("🎯 **Optimization Objective:** Budgets were optimized to maximize total revenue (Volume × Price)")
         
-        # Volume metrics (primary - optimized)
-        base_volume = result['base_volume']
-        optimized_volume = result['optimized_volume']
-        volume_increase = optimized_volume - base_volume
-        volume_increase_pct = (volume_increase / base_volume * 100) if base_volume > 0 else 0
-        
-        # Revenue metrics (secondary - calculated for display)
+        # Revenue metrics (primary - optimized)
         base_revenue = result['base_revenue']
         optimized_revenue = result['optimized_revenue']
         revenue_increase = optimized_revenue - base_revenue
         revenue_increase_pct = (revenue_increase / base_revenue * 100) if base_revenue > 0 else 0
         
+        # Volume metrics (secondary - calculated for display)
+        base_volume = result['base_volume']
+        optimized_volume = result['optimized_volume']
+        volume_increase = optimized_volume - base_volume
+        volume_increase_pct = (volume_increase / base_volume * 100) if base_volume > 0 else 0
+        
+        # Display revenue metrics first (primary optimization objective)
+        st.markdown("### 💰 Revenue Metrics (Optimized)")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Base Revenue", f"${base_revenue:,.2f}")
+        with col2:
+            st.metric("Optimized Revenue", f"${optimized_revenue:,.2f}", 
+                      delta=f"${revenue_increase:,.2f}")
+        with col3:
+            st.metric("Revenue Increase", f"{revenue_increase_pct:.2f}%")
+        
         # Display volume metrics
-        st.markdown("### 📦 Volume Metrics (Optimized)")
+        st.markdown("### 📦 Volume Metrics (Calculated)")
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("Base Volume", f"{base_volume:,.2f} units")
@@ -1223,17 +1298,6 @@ def main():
                       delta=f"{volume_increase:,.2f} units")
         with col3:
             st.metric("Volume Increase", f"{volume_increase_pct:.2f}%")
-        
-        # Display revenue metrics
-        st.markdown("### 💰 Revenue Metrics (Calculated)")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Base Revenue", format_currency(base_revenue))
-        with col2:
-            st.metric("Optimized Revenue", format_currency(optimized_revenue), 
-                      delta=format_currency(revenue_increase))
-        with col3:
-            st.metric("Revenue Increase", f"{revenue_increase_pct:.2f}%")
         
         st.markdown("---")
         
@@ -1478,6 +1542,13 @@ def main():
                 item_name = row['item_name']
                 new_budget = row['base_budget']
                 master_df_contrib.loc[master_df_contrib['item_name'] == item_name, 'base_budget'] = new_budget
+        
+        # Apply edited CPMs if available (same as optimizer)
+        if 'edited_cpms' in st.session_state:
+            for idx, row in st.session_state.edited_cpms.iterrows():
+                item_name = row['item_name']
+                new_cpm = row['cpm']
+                master_df_contrib.loc[master_df_contrib['item_name'] == item_name, 'cpm'] = new_cpm
         
         # Get Google Trends value
         google_trends_value_contrib, _, _, _ = get_google_trends_value(data_files.get('google_trends'), selected_week)
