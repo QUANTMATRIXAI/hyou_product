@@ -81,4 +81,3 @@ def get_channel_beta_mapping():
         "traffic(all sku's)": 'Beta_Daily_Impressions_OUTCOME_ENGAGEMENT',
         "catalog campaign(all sku's)": None  # Distributed to products via attribution
     }
-
