@@ -86,3 +86,4 @@ def highlight_large_changes(row, threshold=0.10):
     else:
         # Return empty styles (no highlighting)
         return [''] * len(row)
+
