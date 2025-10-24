@@ -63,7 +63,7 @@ def create_impression_dict(impressions, beta_column_names):
 # VOLUME PREDICTION
 # ============================================================================
 
-def predict_volume(beta_row, impression_dict):
+def predict_volume(beta_row, impression_dict, debug=False):
     """Calculate predicted volume for a single product using beta coefficients and impressions."""
     # Start with the intercept (B0) - handle variations like "B0 (Original)"
     volume = 0.0
@@ -75,6 +75,11 @@ def predict_volume(beta_row, impression_dict):
     if pd.isna(volume) or not np.isfinite(volume):
         volume = 0.0
     
+    # DEBUG: Track which coefficients are used
+    if debug:
+        used_coefficients = []
+        unused_coefficients = []
+    
     # Iterate through all Beta_ columns
     for col_name in beta_row.index:
         if not col_name.startswith('Beta_'):
@@ -85,6 +90,9 @@ def predict_volume(beta_row, impression_dict):
         if pd.isna(beta_value) or not np.isfinite(beta_value):
             continue
         
+        if beta_value == 0:
+            continue
+            
         if col_name in impression_dict:
             impression_value = impression_dict[col_name]
             
@@ -95,6 +103,37 @@ def predict_volume(beta_row, impression_dict):
             
             if np.isfinite(contribution):
                 volume += contribution
+                if debug:
+                    used_coefficients.append({
+                        'beta_col': col_name,
+                        'beta_value': beta_value,
+                        'data_value': impression_value,
+                        'contribution': contribution
+                    })
+        else:
+            if debug:
+                unused_coefficients.append({
+                    'beta_col': col_name,
+                    'beta_value': beta_value
+                })
+    
+    # DEBUG: Print summary
+    if debug:
+        product_name = beta_row.get('Product title', 'Unknown')
+        print(f"\n>> PREDICTION DEBUG for '{product_name}':")
+        print(f"   B0 (Intercept): {beta_row.get('B0 (Original)', 0.0):.4f}")
+        print(f"   [USED] {len(used_coefficients)} beta coefficients:")
+        for coef in used_coefficients:
+            if 'impression' not in coef['beta_col'].lower():
+                print(f"      {coef['beta_col']}: beta={coef['beta_value']:.6f} x value={coef['data_value']:.4f} = {coef['contribution']:.4f}")
+        
+        if unused_coefficients:
+            print(f"   [UNUSED] {len(unused_coefficients)} beta coefficients:")
+            for coef in unused_coefficients:
+                if 'impression' not in coef['beta_col'].lower():
+                    print(f"      {coef['beta_col']}: beta={coef['beta_value']:.6f} (NOT FOUND in impression_dict)")
+        
+        print(f"   [TOTAL] Predicted volume: {volume:.2f}")
     
     if not np.isfinite(volume):
         volume = 0.0
@@ -102,10 +141,18 @@ def predict_volume(beta_row, impression_dict):
     return max(0.0, volume)
 
 
-def predict_all_volumes(beta_df, impression_dict, modeling_means=None):
+def predict_all_volumes(beta_df, impression_dict, modeling_means=None, debug=False):
     """Predict volumes for all products that have models in the beta DataFrame."""
     if beta_df.empty:
         return pd.Series([], dtype=float, name='Predicted Volume')
+    
+    # DEBUG: Print impression_dict
+    if debug:
+        print("\n" + "="*80)
+        print("DEBUG: IMPRESSION DICT (before adding modeling means)")
+        print("="*80)
+        for key, val in impression_dict.items():
+            print(f"  {key} = {val:.4f}")
     
     # Create a dictionary mapping lowercase product names to (original_name, beta_row)
     product_map = {}
@@ -140,7 +187,7 @@ def predict_all_volumes(beta_df, impression_dict, modeling_means=None):
                     if modeling_means is not None and product_name_lower in modeling_means:
                         product_impression_dict.update(modeling_means[product_name_lower])
                     
-                    volume = predict_volume(beta_row, product_impression_dict)
+                    volume = predict_volume(beta_row, product_impression_dict, debug=debug)
                     volumes[original_name] = volume
     
     # Also predict for "Other Products" if it exists
@@ -152,9 +199,13 @@ def predict_all_volumes(beta_df, impression_dict, modeling_means=None):
             
             # Add product-specific modeling means
             if modeling_means is not None and 'other products' in modeling_means:
+                if debug:
+                    print("\nDEBUG: Adding modeling_means for 'other products':")
+                    for key, val in modeling_means['other products'].items():
+                        print(f"  {key} = {val:.4f}")
                 product_impression_dict.update(modeling_means['other products'])
             
-            volume = predict_volume(beta_row, product_impression_dict)
+            volume = predict_volume(beta_row, product_impression_dict, debug=debug)
             volumes[original_name] = volume
     
     return pd.Series(volumes, name='Predicted Volume')
@@ -251,13 +302,12 @@ def calculate_revenue_for_display(budgets, beta_df, cpm_values, price_dict, item
 
 
 def create_objective_function(beta_df, cpm_values, item_names,
-                               beta_column_names, google_trends_value=50.0, modeling_means=None):
+                               beta_column_names, google_trends_value=50.0, modeling_means=None, price_dict=None):
     """
-    Create an objective function for volume-based optimization.
+    Create an objective function for revenue-based optimization.
     
     This function creates and returns an objective function that maximizes total predicted
-    volume across all products. The objective function does NOT use product prices - it
-    optimizes purely based on predicted sales quantity.
+    revenue across all products. Revenue is calculated as volume × price for each product.
     
     Args:
         beta_df: DataFrame containing beta coefficients for volume prediction
@@ -266,14 +316,17 @@ def create_objective_function(beta_df, cpm_values, item_names,
         beta_column_names: Array of beta column names corresponding to items
         google_trends_value: Google Trends seasonality value (default 50.0)
         modeling_means: Optional dict of product-specific mean values for variables
+        price_dict: Dictionary mapping product names (lowercase) to prices
     
     Returns:
-        objective: Function that takes budget array and returns negative total volume
+        objective: Function that takes budget array and returns negative total revenue
                   (negative because optimizer minimizes)
     """
     
+    first_call = [True]  # Use list to make it mutable in closure
+    
     def objective(budgets):
-        """Calculate negative total volume for given budget allocation."""
+        """Calculate negative total revenue for given budget allocation."""
         try:
             if np.any(budgets < 0):
                 return 1e10
@@ -294,18 +347,41 @@ def create_objective_function(beta_df, cpm_values, item_names,
             # Note: modeling_means are product-specific, so they need to be added per product
             # This will be handled in predict_all_volumes
             
-            volumes = predict_all_volumes(beta_df, impression_dict, modeling_means)
+            # DEBUG: Enable debug mode for first call only (disabled by default)
+            debug = False  # Set to True to enable debug output
+            if first_call[0] and debug:
+                print("\n" + "="*80)
+                print("DEBUG: FIRST OBJECTIVE FUNCTION CALL")
+                print("="*80)
+                first_call[0] = False
+            
+            volumes = predict_all_volumes(beta_df, impression_dict, modeling_means, debug=debug)
             
             if volumes.isna().any() or np.any(~np.isfinite(volumes.values)):
                 return 1e10
             
-            # Sum volumes directly (no price multiplication)
-            total_volume = volumes.sum()
+            # Calculate revenue by multiplying volume by price for each product
+            total_revenue = 0.0
             
-            if not np.isfinite(total_volume) or total_volume < 0:
+            if price_dict is not None:
+                for product_name, volume in volumes.items():
+                    product_price = price_dict.get(product_name.lower(), 0.0)
+                    revenue = volume * product_price
+                    
+                    if np.isfinite(revenue):
+                        total_revenue += revenue
+            else:
+                # Fallback: if no price_dict, use volume (for backwards compatibility)
+                total_revenue = volumes.sum()
+            
+            if not np.isfinite(total_revenue) or total_revenue < 0:
                 return 1e10
             
-            return -total_volume  # Negative because optimizer minimizes
+            if debug:
+                print(f"\n>> TOTAL PREDICTED REVENUE: ${total_revenue:,.2f}")
+                print("="*80)
+            
+            return -total_revenue  # Negative because optimizer minimizes
             
         except (ValueError, ZeroDivisionError, FloatingPointError):
             return 1e10
@@ -348,16 +424,16 @@ def optimize_budgets(objective_fn, base_budgets, bounds, constraints=None):
             }
         )
         
-        # Note: result.fun is negative volume (because we minimize -volume)
-        optimized_volume = -result.fun
+        # Note: result.fun is negative revenue (because we minimize -revenue)
+        optimized_revenue = -result.fun
         
         if not result.success:
-            base_volume = -objective_fn(base_budgets)
-            if optimized_volume > base_volume and np.isfinite(optimized_volume):
+            base_revenue = -objective_fn(base_budgets)
+            if optimized_revenue > base_revenue and np.isfinite(optimized_revenue):
                 optimization_result = {
                     'success': False,
                     'optimized_budgets': result.x,
-                    'optimized_volume': optimized_volume,
+                    'optimized_revenue': optimized_revenue,
                     'message': f"Partial convergence: {result.message}",
                     'iterations': result.nit if hasattr(result, 'nit') else 0,
                     'function_evals': result.nfev if hasattr(result, 'nfev') else 0
@@ -366,7 +442,7 @@ def optimize_budgets(objective_fn, base_budgets, bounds, constraints=None):
                 optimization_result = {
                     'success': False,
                     'optimized_budgets': base_budgets,
-                    'optimized_volume': base_volume,
+                    'optimized_revenue': base_revenue,
                     'message': f"Optimization failed to improve results: {result.message}",
                     'iterations': result.nit if hasattr(result, 'nit') else 0,
                     'function_evals': result.nfev if hasattr(result, 'nfev') else 0
@@ -375,7 +451,7 @@ def optimize_budgets(objective_fn, base_budgets, bounds, constraints=None):
             optimization_result = {
                 'success': result.success,
                 'optimized_budgets': result.x,
-                'optimized_volume': optimized_volume,
+                'optimized_revenue': optimized_revenue,
                 'message': result.message,
                 'iterations': result.nit if hasattr(result, 'nit') else 0,
                 'function_evals': result.nfev if hasattr(result, 'nfev') else 0
@@ -387,7 +463,7 @@ def optimize_budgets(objective_fn, base_budgets, bounds, constraints=None):
         return {
             'success': False,
             'optimized_budgets': base_budgets,
-            'optimized_volume': 0.0,
+            'optimized_revenue': 0.0,
             'message': f"Numerical error during optimization: {str(e)}",
             'iterations': 0,
             'function_evals': 0
@@ -396,7 +472,7 @@ def optimize_budgets(objective_fn, base_budgets, bounds, constraints=None):
         return {
             'success': False,
             'optimized_budgets': base_budgets,
-            'optimized_volume': 0.0,
+            'optimized_revenue': 0.0,
             'message': f"Optimization failed: {str(e)}",
             'iterations': 0,
             'function_evals': 0
