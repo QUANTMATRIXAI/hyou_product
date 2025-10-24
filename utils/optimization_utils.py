@@ -199,15 +199,81 @@ def calculate_revenue(volumes, prices):
 # OPTIMIZATION
 # ============================================================================
 
-def create_objective_function(beta_df, cpm_values, price_dict, item_names,
-                               beta_column_names, google_trends_value=50.0, modeling_means=None):
-    """Create an objective function that encapsulates the full prediction pipeline."""
+def calculate_revenue_for_display(budgets, beta_df, cpm_values, price_dict, item_names,
+                                   beta_column_names, google_trends_value=50.0, modeling_means=None):
+    """
+    Calculate revenue and volume for display purposes (not used in optimization).
     
-    # Create case-insensitive price lookup once (outside the objective function for efficiency)
-    price_dict_lower = {k.lower(): v for k, v in price_dict.items()}
+    This function runs the same prediction pipeline as the objective function but
+    multiplies volumes by prices to calculate revenue. It's used to show revenue
+    metrics alongside volume metrics in the results display.
+    
+    Args:
+        budgets: Array of budget allocations
+        beta_df: DataFrame containing beta coefficients
+        cpm_values: Array of CPM values
+        price_dict: Dictionary mapping product names to prices
+        item_names: Array of product/channel names
+        beta_column_names: Array of beta column names
+        google_trends_value: Google Trends seasonality value (default 50.0)
+        modeling_means: Optional dict of product-specific mean values
+    
+    Returns:
+        tuple: (revenue, total_volume) - Revenue in dollars and total volume in units
+    """
+    try:
+        # Calculate impressions
+        impressions = calculate_impressions(budgets, cpm_values)
+        
+        # Create impression dict
+        impression_dict = create_impression_dict(impressions, beta_column_names)
+        impression_dict['Beta_google_trends'] = google_trends_value
+        
+        # Predict volumes
+        volumes = predict_all_volumes(beta_df, impression_dict, modeling_means)
+        
+        # Calculate total volume
+        total_volume = volumes.sum()
+        
+        # Calculate revenue using prices
+        price_dict_lower = {k.lower(): v for k, v in price_dict.items()}
+        product_prices = np.array([
+            price_dict_lower.get(product_name.lower(), 0.0) 
+            for product_name in volumes.index
+        ])
+        
+        revenue = calculate_revenue(volumes, product_prices)
+        
+        return revenue, total_volume
+        
+    except Exception:
+        return 0.0, 0.0
+
+
+def create_objective_function(beta_df, cpm_values, item_names,
+                               beta_column_names, google_trends_value=50.0, modeling_means=None):
+    """
+    Create an objective function for volume-based optimization.
+    
+    This function creates and returns an objective function that maximizes total predicted
+    volume across all products. The objective function does NOT use product prices - it
+    optimizes purely based on predicted sales quantity.
+    
+    Args:
+        beta_df: DataFrame containing beta coefficients for volume prediction
+        cpm_values: Array of CPM values for impression calculation
+        item_names: Array of product/channel names
+        beta_column_names: Array of beta column names corresponding to items
+        google_trends_value: Google Trends seasonality value (default 50.0)
+        modeling_means: Optional dict of product-specific mean values for variables
+    
+    Returns:
+        objective: Function that takes budget array and returns negative total volume
+                  (negative because optimizer minimizes)
+    """
     
     def objective(budgets):
-        """Calculate negative revenue for given budget allocation."""
+        """Calculate negative total volume for given budget allocation."""
         try:
             if np.any(budgets < 0):
                 return 1e10
@@ -233,18 +299,13 @@ def create_objective_function(beta_df, cpm_values, price_dict, item_names,
             if volumes.isna().any() or np.any(~np.isfinite(volumes.values)):
                 return 1e10
             
-            # Use case-insensitive price lookup
-            product_prices = np.array([
-                price_dict_lower.get(product_name.lower(), 0.0) 
-                for product_name in volumes.index
-            ])
+            # Sum volumes directly (no price multiplication)
+            total_volume = volumes.sum()
             
-            revenue = calculate_revenue(volumes, product_prices)
-            
-            if not np.isfinite(revenue) or revenue < 0:
+            if not np.isfinite(total_volume) or total_volume < 0:
                 return 1e10
             
-            return -revenue
+            return -total_volume  # Negative because optimizer minimizes
             
         except (ValueError, ZeroDivisionError, FloatingPointError):
             return 1e10
@@ -287,15 +348,16 @@ def optimize_budgets(objective_fn, base_budgets, bounds, constraints=None):
             }
         )
         
-        optimized_revenue = -result.fun
+        # Note: result.fun is negative volume (because we minimize -volume)
+        optimized_volume = -result.fun
         
         if not result.success:
-            base_revenue = -objective_fn(base_budgets)
-            if optimized_revenue > base_revenue and np.isfinite(optimized_revenue):
+            base_volume = -objective_fn(base_budgets)
+            if optimized_volume > base_volume and np.isfinite(optimized_volume):
                 optimization_result = {
                     'success': False,
                     'optimized_budgets': result.x,
-                    'optimized_revenue': optimized_revenue,
+                    'optimized_volume': optimized_volume,
                     'message': f"Partial convergence: {result.message}",
                     'iterations': result.nit if hasattr(result, 'nit') else 0,
                     'function_evals': result.nfev if hasattr(result, 'nfev') else 0
@@ -304,7 +366,7 @@ def optimize_budgets(objective_fn, base_budgets, bounds, constraints=None):
                 optimization_result = {
                     'success': False,
                     'optimized_budgets': base_budgets,
-                    'optimized_revenue': base_revenue,
+                    'optimized_volume': base_volume,
                     'message': f"Optimization failed to improve results: {result.message}",
                     'iterations': result.nit if hasattr(result, 'nit') else 0,
                     'function_evals': result.nfev if hasattr(result, 'nfev') else 0
@@ -313,7 +375,7 @@ def optimize_budgets(objective_fn, base_budgets, bounds, constraints=None):
             optimization_result = {
                 'success': result.success,
                 'optimized_budgets': result.x,
-                'optimized_revenue': optimized_revenue,
+                'optimized_volume': optimized_volume,
                 'message': result.message,
                 'iterations': result.nit if hasattr(result, 'nit') else 0,
                 'function_evals': result.nfev if hasattr(result, 'nfev') else 0
@@ -325,7 +387,7 @@ def optimize_budgets(objective_fn, base_budgets, bounds, constraints=None):
         return {
             'success': False,
             'optimized_budgets': base_budgets,
-            'optimized_revenue': 0.0,
+            'optimized_volume': 0.0,
             'message': f"Numerical error during optimization: {str(e)}",
             'iterations': 0,
             'function_evals': 0
@@ -334,7 +396,7 @@ def optimize_budgets(objective_fn, base_budgets, bounds, constraints=None):
         return {
             'success': False,
             'optimized_budgets': base_budgets,
-            'optimized_revenue': 0.0,
+            'optimized_volume': 0.0,
             'message': f"Optimization failed: {str(e)}",
             'iterations': 0,
             'function_evals': 0
