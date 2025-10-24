@@ -584,10 +584,18 @@ def main():
             if 'edited_budgets' not in st.session_state or st.session_state.get('last_selected_week') != selected_week:
                 st.session_state.edited_budgets = master_df_temp[['item_name', 'base_budget']].copy()
                 st.session_state.last_selected_week = selected_week
+                # Reset counter when week changes to force editor refresh
+                if 'budget_reset_counter' not in st.session_state:
+                    st.session_state.budget_reset_counter = 0
+                st.session_state.budget_reset_counter += 1
             
             if 'edited_cpms' not in st.session_state or st.session_state.get('last_selected_week_cpm') != selected_week:
                 st.session_state.edited_cpms = master_df_temp[['item_name', 'cpm']].copy()
                 st.session_state.last_selected_week_cpm = selected_week
+                # Reset counter when week changes to force editor refresh
+                if 'cpm_reset_counter' not in st.session_state:
+                    st.session_state.cpm_reset_counter = 0
+                st.session_state.cpm_reset_counter += 1
             
             # Create two columns for side-by-side editors
             col_budget, col_cpm = st.columns(2)
@@ -595,6 +603,21 @@ def main():
             # Budget Editor (Left Column)
             with col_budget:
                 st.markdown("### 💰 Edit Base Budgets")
+                
+                # Check for reset action first
+                if st.session_state.get('reset_budgets_flag', False):
+                    st.session_state.edited_budgets = st.session_state.original_budgets.copy()
+                    st.session_state.optimization_result = None
+                    st.session_state.reset_budgets_flag = False
+                    # Increment reset counter to force editor refresh
+                    if 'budget_reset_counter' not in st.session_state:
+                        st.session_state.budget_reset_counter = 0
+                    st.session_state.budget_reset_counter += 1
+                    st.success("✅ Budget reset to file values!")
+                
+                # Initialize reset counter if not exists
+                if 'budget_reset_counter' not in st.session_state:
+                    st.session_state.budget_reset_counter = 0
                 
                 edited_df = st.data_editor(
                     st.session_state.edited_budgets,
@@ -604,28 +627,41 @@ def main():
                     },
                     hide_index=True,
                     use_container_width=True,
-                    key="budget_editor"
+                    key=f"budget_editor_{st.session_state.budget_reset_counter}"
                 )
                 
-                col1, col2 = st.columns(2)
+                # Auto-save: Update session state with current editor values
+                st.session_state.edited_budgets = edited_df.copy()
+                
+                col1, col2 = st.columns([3, 1])
                 with col1:
-                    if st.button("💾 Save", use_container_width=True, key="save_budgets"):
-                        st.session_state.edited_budgets = edited_df.copy()
-                        st.success("✅ Budget changes saved!")
-                        st.rerun()
+                    total_budget = edited_df['base_budget'].sum()
+                    st.metric("Total Budget", f"${total_budget:,.2f}")
                 with col2:
                     if st.button("🔄 Reset", use_container_width=True, key="reset_budgets"):
-                        st.session_state.edited_budgets = st.session_state.original_budgets.copy()
-                        st.session_state.optimization_result = None
-                        st.success("✅ Budget reset to file values!")
+                        st.session_state.reset_budgets_flag = True
                         st.rerun()
                 
-                total_budget = edited_df['base_budget'].sum()
-                st.metric("Total Budget", f"${total_budget:,.2f}")
+                st.caption("💡 Changes are saved automatically")
             
             # CPM Editor (Right Column)
             with col_cpm:
                 st.markdown("### 📊 Edit CPM Values")
+                
+                # Check for reset action first
+                if st.session_state.get('reset_cpms_flag', False):
+                    st.session_state.edited_cpms = st.session_state.original_cpms.copy()
+                    st.session_state.optimization_result = None
+                    st.session_state.reset_cpms_flag = False
+                    # Increment reset counter to force editor refresh
+                    if 'cpm_reset_counter' not in st.session_state:
+                        st.session_state.cpm_reset_counter = 0
+                    st.session_state.cpm_reset_counter += 1
+                    st.success("✅ CPM reset to file values!")
+                
+                # Initialize reset counter if not exists
+                if 'cpm_reset_counter' not in st.session_state:
+                    st.session_state.cpm_reset_counter = 0
                 
                 edited_cpm_df = st.data_editor(
                     st.session_state.edited_cpms,
@@ -635,24 +671,22 @@ def main():
                     },
                     hide_index=True,
                     use_container_width=True,
-                    key="cpm_editor"
+                    key=f"cpm_editor_{st.session_state.cpm_reset_counter}"
                 )
                 
-                col1_cpm, col2_cpm = st.columns(2)
+                # Auto-save: Update session state with current editor values
+                st.session_state.edited_cpms = edited_cpm_df.copy()
+                
+                col1_cpm, col2_cpm = st.columns([3, 1])
                 with col1_cpm:
-                    if st.button("💾 Save", use_container_width=True, key="save_cpms"):
-                        st.session_state.edited_cpms = edited_cpm_df.copy()
-                        st.success("✅ CPM changes saved!")
-                        st.rerun()
+                    avg_cpm = edited_cpm_df['cpm'].mean()
+                    st.metric("Average CPM", f"${avg_cpm:,.2f}")
                 with col2_cpm:
                     if st.button("🔄 Reset", use_container_width=True, key="reset_cpms"):
-                        st.session_state.edited_cpms = st.session_state.original_cpms.copy()
-                        st.session_state.optimization_result = None
-                        st.success("✅ CPM reset to file values!")
+                        st.session_state.reset_cpms_flag = True
                         st.rerun()
                 
-                avg_cpm = edited_cpm_df['cpm'].mean()
-                st.metric("Average CPM", f"${avg_cpm:,.2f}")
+                st.caption("💡 Changes are saved automatically")
         
         # Expanders for advanced details (HIDDEN)
         if False:  # Hidden expander
