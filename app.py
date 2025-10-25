@@ -557,10 +557,10 @@ def main():
             constraint_pct = st.slider("📊 Budget Change Limit (±%):", 5, 50, 25, 5, key="constraint_slider")
             st.session_state.constraint_pct = constraint_pct
         
-        with col3:
-            use_wide_bounds_ui = st.checkbox("🔓 Use Wide Bounds (0.1x-10x)", value=False, 
-                                            help="Wide bounds allow larger budget reallocations for better optimization. Recommended!")
-            st.session_state.use_wide_bounds = use_wide_bounds_ui
+        # with col3:
+        #     use_wide_bounds_ui = st.checkbox("🔓 Use Wide Bounds (0.1x-10x)", value=False, 
+        #                                     help="Wide bounds allow larger budget reallocations for better optimization. Recommended!")
+        #     st.session_state.use_wide_bounds = use_wide_bounds_ui
         
         col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 2])
         with col_btn1:
@@ -1369,189 +1369,19 @@ def main():
         
         # # st.markdown("---")
         
-        # Results tabs
-        result_tab1, result_tab2, result_tab3, result_tab4 = st.tabs(["💰 Budget Changes", "📊 Visualizations", "📋 Detailed Table", "🧬 Beta Analysis"])
-        
+        # Detailed Table
         comparison_df = create_comparison_table(result['item_names'], result['base_budgets'], result['optimized_budgets'])
         
-        with result_tab1:
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Total Base Budget", format_currency(result['base_budgets'].sum()))
-            with col2:
-                st.metric("Total Optimized Budget", format_currency(result['optimized_budgets'].sum()))
-            with col3:
-                st.metric("Avg Change", f"{comparison_df['Change (%)'].abs().mean():.2f}%")
-            with col4:
-                st.metric("Max Increase", f"{comparison_df['Change (%)'].max():.2f}%")
-            
-            st.dataframe(comparison_df, use_container_width=True, height=500)
-        
-        with result_tab2:
-            fig = go.Figure()
-            fig.add_trace(go.Bar(name='Base', x=comparison_df['Item'], y=comparison_df['Base Budget'], marker_color='lightblue'))
-            fig.add_trace(go.Bar(name='Optimized', x=comparison_df['Item'], y=comparison_df['Optimized Budget'], marker_color='darkblue'))
-            fig.update_layout(title="Budget Allocation Comparison", barmode='group', height=500, xaxis={'tickangle': -45})
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with result_tab3:
-            st.dataframe(
-                comparison_df.style.format({
-                    'Base Budget': lambda x: f"${x:,.2f}",
-                    'Optimized Budget': lambda x: f"${x:,.2f}",
-                    'Change ($)': lambda x: f"${x:,.2f}",
-                    'Change (%)': lambda x: f"{x:.2f}%"
-                }).background_gradient(subset=['Change (%)'], cmap='RdYlGn', vmin=-25, vmax=25),
-                use_container_width=True,
-                height=600
-            )
-        
-        with result_tab4:
-            st.markdown("### 🧬 Beta Analysis: Budget Changes vs Beta Values")
-            st.info("Shows the sum of all product betas for each impression variable and whether budget was increased/decreased")
-            
-            # Get beta values for each product/channel
-            # For ALL items: sum betas across all products because impressions are shared
-            beta_analysis_data = []
-            
-            # DEBUG: Show first few beta columns
-            with st.expander("🔍 DEBUG: Beta Columns in File"):
-                beta_cols = [col for col in data_files['beta'].columns if col.startswith('Beta_') and 'impression' in col.lower()]
-                st.write(f"Found {len(beta_cols)} impression beta columns:")
-                for col in beta_cols[:10]:
-                    st.write(f"  - {col}")
-            
-            for i, item_name in enumerate(result['item_names']):
-                product_name_lower = item_name.lower()
-                
-                # Determine the beta column name for this item
-                beta_col_name = None
-                
-                # For channels
-                if 'google' in product_name_lower and 'campaign' in product_name_lower:
-                    beta_col_name = 'Beta_Google_Impression'
-                elif 'traffic' in product_name_lower:
-                    beta_col_name = 'Beta_Daily_Impressions_OUTCOME_ENGAGEMENT'
-                # Special case: Other Products
-                elif 'other products' in product_name_lower:
-                    beta_col_name = 'Beta_Impressions'
-                # For products - construct the beta column name
-                else:
-                    # Convert product name to beta column format (keep spaces!)
-                    normalized_name = product_name_lower
-                    beta_col_name = f'Beta_{normalized_name}_meta_impression'
-                
-                # Sum betas across ALL products for this variable
-                beta_sum = 0
-                found_count = 0
-                if beta_col_name:
-                    for idx, beta_row in data_files['beta'].iterrows():
-                        if beta_col_name in beta_row.index:
-                            beta_val = beta_row[beta_col_name]
-                            if pd.notna(beta_val):
-                                beta_sum += beta_val
-                                found_count += 1
-                
-                # Get budget change
-                base_budget = result['base_budgets'][i]
-                opt_budget = result['optimized_budgets'][i]
-                budget_change_pct = ((opt_budget - base_budget) / base_budget * 100) if base_budget > 0 else 0
-                
-                # Explanation of what this beta sum means
-                explanation = f"Sum of {found_count} product betas for '{beta_col_name}'"
-                
-                beta_analysis_data.append({
-                    'Item (Budget Allocation)': item_name,
-                    'Beta Column': beta_col_name,
-                    'Beta Sum (All Products)': beta_sum,
-                    '# Products': found_count,
-                    'Budget Change (%)': budget_change_pct,
-                    'Base Budget': base_budget,
-                    'Optimized Budget': opt_budget,
-                    'Direction': '📈 Increased' if budget_change_pct > 0 else ('📉 Decreased' if budget_change_pct < 0 else '➡️ Unchanged'),
-                    'Explanation': explanation
-                })
-            
-            beta_analysis_df = pd.DataFrame(beta_analysis_data)
-            beta_analysis_df = beta_analysis_df.sort_values('Beta Sum (All Products)', ascending=False)
-            
-            st.markdown("### 📊 Beta Analysis Table")
-            st.info("📊 **Table Explanation:** Each row shows a budget allocation item. 'Beta Sum (All Products)' is the SUM of ALL product betas for that item's impression variable.")
-            
-            st.dataframe(
-                beta_analysis_df.style.format({
-                    'Beta Sum (All Products)': lambda x: f"{x:.6f}",
-                    'Budget Change (%)': lambda x: f"{x:.2f}%",
-                    'Base Budget': lambda x: f"${x:,.2f}",
-                    'Optimized Budget': lambda x: f"${x:,.2f}"
-                }).background_gradient(subset=['Beta Sum (All Products)'], cmap='Blues'),
-                use_container_width=True,
-                height=600
-            )
-            
-            # Verification: Compare beta sums with contribution chart
-            st.markdown("### ✅ Verification: Beta Sum vs Contribution Chart")
-            
-            # Calculate expected contribution for each item using beta sum
-            verification_data = []
-            for i, row in beta_analysis_df.iterrows():
-                item_name = row['Item (Budget Allocation)']
-                beta_sum = row['Beta Sum (All Products)']
-                
-                # Get impressions for this item from impression_dict (if available)
-                # We need to recalculate impression_dict here
-                try:
-                    # Get the budget and CPM for this item
-                    budget = row['Base Budget']  # Use base budget for verification
-                    
-                    # Find CPM from master_df
-                    master_df_temp = prepare_master_dataframe(
-                        data_files['budget'], data_files['cpm'],
-                        data_files['attribution'], data_files['price'], selected_week
-                    )
-                    cpm_row = master_df_temp[master_df_temp['item_name'] == item_name]
-                    if len(cpm_row) > 0:
-                        cpm = cpm_row['cpm'].values[0]
-                        impressions = (budget / cpm) * 1000 if cpm > 0 else 0
-                        expected_contribution = beta_sum * impressions
-                        
-                        verification_data.append({
-                            'Item': item_name,
-                            'Beta Sum': beta_sum,
-                            'Impressions': impressions,
-                            'Expected Contribution': expected_contribution,
-                            'Formula': f"{beta_sum:.6f} × {impressions:,.0f}"
-                        })
-                except:
-                    pass
-            
-            if verification_data:
-                verification_df = pd.DataFrame(verification_data)
-                st.dataframe(
-                    verification_df.style.format({
-                        'Beta Sum': lambda x: f"{x:.6f}",
-                        'Impressions': lambda x: f"{x:,.0f}",
-                        'Expected Contribution': lambda x: f"{x:,.2f}"
-                    }),
-                    use_container_width=True,
-                    height=400
-                )
-                
-                st.info("💡 **How to verify:** Go to Contribution Analysis tab, select an impression variable, and check if the total contribution matches the 'Expected Contribution' above.")
-            
-            st.markdown("### 📈 Interpretation")
-            st.markdown("""
-            **Expected Pattern:**
-            - ✅ Items with **higher beta sums** should get **increased budget**
-            - ✅ Items with **lower beta sums** should get **decreased budget**
-            
-            **Beta Sum Calculation:**
-            - Beta Sum = SUM of all product betas for that impression variable
-            - When budget creates impressions, those impressions affect ALL products
-            - Total contribution = (Sum of betas) × Impressions
-            
-            **Note:** If "Products with Beta" is 0, the beta column name might not match. Check the DEBUG section above.
-            """)
+        st.dataframe(
+            comparison_df.style.format({
+                'Base Budget': lambda x: f"${x:,.2f}",
+                'Optimized Budget': lambda x: f"${x:,.2f}",
+                'Change ($)': lambda x: f"${x:,.2f}",
+                'Change (%)': lambda x: f"{x:.2f}%"
+            }).background_gradient(subset=['Change (%)'], cmap='RdYlGn', vmin=-25, vmax=25),
+            use_container_width=True,
+            height=600
+        )
     
     # ========== TAB 3: CONTRIBUTION ANALYSIS ==========
     with tab3:
@@ -2516,406 +2346,722 @@ Where:
                 import traceback
                 st.code(traceback.format_exc())
         
-        # ========== HISTORICAL OVERVIEW ==========
-        # Showing Historical Overview directly (Portfolio and Product Analysis tabs hidden)
-        st.markdown("### 📜 Historical Overview")
-        st.info("📊 Portfolio revenue contributions split into **Own** (product's own impressions × price) and **Other** (other products' contributions). Traffic & Google show only Own.")
+        # ========== CONTRIBUTION ANALYSIS TABS ==========
+        contrib_subtab1, contrib_subtab2 = st.tabs(["📜 Portfolio Analysis", "🔍 Product-Level Analysis"])
         
-        try:
-            # Get product prices from master_df_contrib
-            product_prices = {}
-            for idx, row in master_df_contrib.iterrows():
-                product_name = row['item_name']
-                product_price = row.get('price', 0.0)
-                if pd.notna(product_price) and product_price > 0:
-                    product_prices[product_name.lower()] = product_price
+        # ========== PORTFOLIO ANALYSIS TAB ==========
+        with contrib_subtab1:
+            st.markdown("### 📜 Historical Overview")
+            st.info("📊 Portfolio revenue contributions split into **Own** (product's own impressions × price) and **Other** (other products' contributions). Traffic & Google show only Own.")
             
-            # Calculate historical revenue contributions using mean values
-            # Split into "Own" and "Other" for product-specific Meta ads
-            historical_contributions = {}
-            own_contributions = {}  # For product's own impression contribution
-            other_contributions = {}  # For other products' contributions
-            
-            # First pass: collect all contributions by variable and product
-            product_variable_contributions = {}  # {variable: {product: contribution}}
-            
-            for idx, beta_row in beta_df.iterrows():
-                product_name = beta_row.get('Product title', '')
-                if pd.isna(product_name) or product_name == '':
-                    continue
+            try:
+                # Get product prices from master_df_contrib
+                product_prices = {}
+                for idx, row in master_df_contrib.iterrows():
+                    product_name = row['item_name']
+                    product_price = row.get('price', 0.0)
+                    if pd.notna(product_price) and product_price > 0:
+                        product_prices[product_name.lower()] = product_price
                 
-                # Get product price
-                product_price = product_prices.get(product_name.lower(), 0.0)
-                if product_price == 0:
-                    continue  # Skip products without prices (can't calculate revenue)
+                # Calculate historical revenue contributions using mean values
+                # Split into "Own" and "Other" for product-specific Meta ads
+                historical_contributions = {}
+                own_contributions = {}  # For product's own impression contribution
+                other_contributions = {}  # For other products' contributions
                 
-                # Get product data
-                product_data = modeling_df[modeling_df[product_col].str.lower() == product_name.lower()]
+                # First pass: collect all contributions by variable and product
+                product_variable_contributions = {}  # {variable: {product: contribution}}
                 
-                # Process all Beta columns using historical means
-                for col in beta_row.index:
-                    if not col.startswith('Beta_'):
+                for idx, beta_row in beta_df.iterrows():
+                    product_name = beta_row.get('Product title', '')
+                    if pd.isna(product_name) or product_name == '':
                         continue
                     
-                    beta_value = beta_row[col]
-                    if pd.isna(beta_value):
-                        continue
+                        # Get product price
+                    product_price = product_prices.get(product_name.lower(), 0.0)
+                    if product_price == 0:
+                        continue  # Skip products without prices (can't calculate revenue)
+                
+                    # Get product data
+                    product_data = modeling_df[modeling_df[product_col].str.lower() == product_name.lower()]
+                
+                    # Process all Beta columns using historical means
+                    for col in beta_row.index:
+                        if not col.startswith('Beta_'):
+                            continue
                     
-                    var_name = col.replace('Beta_', '')
-                    display_name = var_name.replace('_', ' ').title()
+                        beta_value = beta_row[col]
+                        if pd.isna(beta_value):
+                            continue
                     
-                    # Get historical mean value
-                    mean_value = None
+                        var_name = col.replace('Beta_', '')
+                        display_name = var_name.replace('_', ' ').title()
                     
-                    # For impressions and Category Discount: use "Other Products" mean (global)
-                    if 'impression' in var_name.lower() or 'category discount' in var_name.lower():
-                        if len(other_products_data) > 0:
+                        # Get historical mean value
+                        mean_value = None
+                    
+                        # For impressions and Category Discount: use "Other Products" mean (global)
+                        if 'impression' in var_name.lower() or 'category discount' in var_name.lower():
+                            if len(other_products_data) > 0:
+                                if var_name in modeling_df.columns:
+                                    mean_value = other_products_data[var_name].mean()
+                                else:
+                                    for data_col in modeling_df.columns:
+                                        col_normalized = data_col.lower().replace(' ', '_').replace('-', '_')
+                                        var_normalized = var_name.lower().replace(' ', '_').replace('-', '_')
+                                        if col_normalized == var_normalized:
+                                            mean_value = other_products_data[data_col].mean()
+                                            break
+                    
+                        # For other variables: use product-specific mean
+                        elif len(product_data) > 0:
                             if var_name in modeling_df.columns:
-                                mean_value = other_products_data[var_name].mean()
+                                mean_value = product_data[var_name].mean()
                             else:
                                 for data_col in modeling_df.columns:
                                     col_normalized = data_col.lower().replace(' ', '_').replace('-', '_')
                                     var_normalized = var_name.lower().replace(' ', '_').replace('-', '_')
                                     if col_normalized == var_normalized:
-                                        mean_value = other_products_data[data_col].mean()
+                                        mean_value = product_data[data_col].mean()
                                         break
                     
-                    # For other variables: use product-specific mean
-                    elif len(product_data) > 0:
-                        if var_name in modeling_df.columns:
-                            mean_value = product_data[var_name].mean()
-                        else:
-                            for data_col in modeling_df.columns:
-                                col_normalized = data_col.lower().replace(' ', '_').replace('-', '_')
-                                var_normalized = var_name.lower().replace(' ', '_').replace('-', '_')
-                                if col_normalized == var_normalized:
-                                    mean_value = product_data[data_col].mean()
-                                    break
-                    
-                    # Calculate REVENUE contribution: (beta × value) × price
-                    if mean_value is not None and pd.notna(mean_value):
-                        volume_contribution = beta_value * mean_value
-                        revenue_contribution = volume_contribution * product_price
+                        # Calculate REVENUE contribution: (beta × value) × price
+                        if mean_value is not None and pd.notna(mean_value):
+                            volume_contribution = beta_value * mean_value
+                            revenue_contribution = volume_contribution * product_price
                         
-                        # Store contribution by variable and product
-                        if display_name not in product_variable_contributions:
-                            product_variable_contributions[display_name] = {}
-                        product_variable_contributions[display_name][product_name] = revenue_contribution
+                            # Store contribution by variable and product
+                            if display_name not in product_variable_contributions:
+                                product_variable_contributions[display_name] = {}
+                            product_variable_contributions[display_name][product_name] = revenue_contribution
             
-            # Second pass: split into "own" and "other" contributions
-            for display_name, product_contribs in product_variable_contributions.items():
-                # Check if this is an impression variable (any impression-related)
-                is_impression = 'impression' in display_name.lower()
+                # Second pass: split into "own" and "other" contributions
+                for display_name, product_contribs in product_variable_contributions.items():
+                    # Check if this is an impression variable (any impression-related)
+                    is_impression = 'impression' in display_name.lower()
                 
-                total_contrib = sum(product_contribs.values())
-                historical_contributions[display_name] = total_contrib
+                    total_contrib = sum(product_contribs.values())
+                    historical_contributions[display_name] = total_contrib
                 
-                if is_impression:
-                    # For ALL impression variables: split by product name matching
+                    if is_impression:
+                        # For ALL impression variables: split by product name matching
                     
-                    # Extract product name from display_name
-                    # "Product A Meta Impression" -> "Product A"
-                    # "Impressions" -> "Other Products"
-                    # "Google Impression" -> keep as is (channel)
-                    # "Daily Impressions Outcome Engagement" -> keep as is (channel)
+                        # Extract product name from display_name
+                        # "Product A Meta Impression" -> "Product A"
+                        # "Impressions" -> "Other Products"
+                        # "Google Impression" -> keep as is (channel)
+                        # "Daily Impressions Outcome Engagement" -> keep as is (channel)
                     
-                    if display_name.lower() == 'impressions':
-                        # This is "Other Products" - uses Beta_Impressions
-                        product_from_var = 'other products'
-                    elif 'google impression' in display_name.lower():
-                        # This is Google Ads - channel level
-                        product_from_var = None  # No product match needed
-                    elif 'daily impressions outcome engagement' in display_name.lower():
-                        # This is Traffic Ads - channel level
-                        product_from_var = None  # No product match needed
-                    elif 'meta impression' in display_name.lower():
-                        # Product-specific Meta ad
-                        product_from_var = display_name.replace(' Meta Impression', '').strip()
-                    else:
-                        product_from_var = None
+                        if display_name.lower() == 'impressions':
+                            # This is "Other Products" - uses Beta_Impressions
+                            product_from_var = 'other products'
+                        elif 'google impression' in display_name.lower():
+                            # This is Google Ads - channel level
+                            product_from_var = None  # No product match needed
+                        elif 'daily impressions outcome engagement' in display_name.lower():
+                            # This is Traffic Ads - channel level
+                            product_from_var = None  # No product match needed
+                        elif 'meta impression' in display_name.lower():
+                            # Product-specific Meta ad
+                            product_from_var = display_name.replace(' Meta Impression', '').strip()
+                        else:
+                            product_from_var = None
                     
-                    # Split contributions
-                    own_contrib = 0.0
-                    other_contrib = 0.0
-                    
-                    if product_from_var is not None:
-                        # This is a product-specific impression variable
-                        for product_name, contrib in product_contribs.items():
-                            # Check if this product matches the variable name
-                            if product_name.lower() == product_from_var.lower():
-                                own_contrib += contrib
-                            else:
-                                other_contrib += contrib
-                    else:
-                        # This is a channel-level impression (Traffic, Google)
-                        own_contrib = total_contrib
+                        # Split contributions
+                        own_contrib = 0.0
                         other_contrib = 0.0
                     
-                    own_contributions[display_name] = own_contrib
-                    other_contributions[display_name] = other_contrib
-                else:
-                    # For non-impression variables: no split, all is "own"
-                    own_contributions[display_name] = total_contrib
-                    other_contributions[display_name] = 0.0
+                        if product_from_var is not None:
+                            # This is a product-specific impression variable
+                            for product_name, contrib in product_contribs.items():
+                                # Check if this product matches the variable name
+                                if product_name.lower() == product_from_var.lower():
+                                    own_contrib += contrib
+                                else:
+                                    other_contrib += contrib
+                        else:
+                            # This is a channel-level impression (Traffic, Google)
+                            own_contrib = total_contrib
+                            other_contrib = 0.0
+                    
+                        own_contributions[display_name] = own_contrib
+                        other_contributions[display_name] = other_contrib
+                    else:
+                        # For non-impression variables: no split, all is "own"
+                        own_contributions[display_name] = total_contrib
+                        other_contributions[display_name] = 0.0
             
-            # Create dataframe
-            if historical_contributions:
-                    hist_df = pd.DataFrame(list(historical_contributions.items()), columns=['Variable', 'Historical Contribution'])
-                    hist_df = hist_df.sort_values('Historical Contribution', ascending=False)
+                # Create dataframe
+                if historical_contributions:
+                        hist_df = pd.DataFrame(list(historical_contributions.items()), columns=['Variable', 'Historical Contribution'])
+                        hist_df = hist_df.sort_values('Historical Contribution', ascending=False)
                     
-                    # Add Own and Other contributions
-                    hist_df['Own Contribution'] = hist_df['Variable'].map(own_contributions).fillna(0.0)
-                    hist_df['Other Contribution'] = hist_df['Variable'].map(other_contributions).fillna(0.0)
+                        # Add Own and Other contributions
+                        hist_df['Own Contribution'] = hist_df['Variable'].map(own_contributions).fillna(0.0)
+                        hist_df['Other Contribution'] = hist_df['Variable'].map(other_contributions).fillna(0.0)
                     
-                    # Separate impression and non-impression
-                    hist_df['Type'] = hist_df['Variable'].apply(lambda x: 'Impression' if 'impression' in x.lower() else 'Other')
+                        # Separate impression and non-impression
+                        hist_df['Type'] = hist_df['Variable'].apply(lambda x: 'Impression' if 'impression' in x.lower() else 'Other')
                     
-                    # Calculate percentages
-                    total_hist = hist_df['Historical Contribution'].sum()
-                    hist_df['Contribution %'] = (hist_df['Historical Contribution'] / total_hist * 100) if total_hist > 0 else 0
-                    hist_df['Own %'] = (hist_df['Own Contribution'] / total_hist * 100) if total_hist > 0 else 0
-                    hist_df['Other %'] = (hist_df['Other Contribution'] / total_hist * 100) if total_hist > 0 else 0
+                        # Calculate percentages
+                        total_hist = hist_df['Historical Contribution'].sum()
+                        hist_df['Contribution %'] = (hist_df['Historical Contribution'] / total_hist * 100) if total_hist > 0 else 0
+                        hist_df['Own %'] = (hist_df['Own Contribution'] / total_hist * 100) if total_hist > 0 else 0
+                        hist_df['Other %'] = (hist_df['Other Contribution'] / total_hist * 100) if total_hist > 0 else 0
                     
-                    # Calculate impression shares - ONLY for variables with Beta coefficients
-                    # Step 1: Get all Beta impression columns from beta file
-                    beta_impression_cols = [col for col in beta_df.columns if col.startswith('Beta_') and 'impression' in col.lower()]
+                        # Calculate impression shares - ONLY for variables with Beta coefficients
+                        # Step 1: Get all Beta impression columns from beta file
+                        beta_impression_cols = [col for col in beta_df.columns if col.startswith('Beta_') and 'impression' in col.lower()]
                     
-                    # Step 2: For each Beta impression column, find matching data and SUM from Other Products
-                    impression_shares = {}
-                    impression_share_display_names = {}  # Map beta_col to display name
+                        # Step 2: For each Beta impression column, find matching data and SUM from Other Products
+                        impression_shares = {}
+                        impression_share_display_names = {}  # Map beta_col to display name
                     
-                    for beta_col in beta_impression_cols:
-                        var_name = beta_col.replace('Beta_', '')
+                        for beta_col in beta_impression_cols:
+                            var_name = beta_col.replace('Beta_', '')
                         
-                        # Try to find matching column in modeling data
-                        found = False
-                        sum_val = 0
+                            # Try to find matching column in modeling data
+                            found = False
+                            sum_val = 0
                         
-                        # Strategy 1: Exact match
-                        if var_name in modeling_df.columns:
-                            sum_val = other_products_data[var_name].sum()
-                            found = True
+                            # Strategy 1: Exact match
+                            if var_name in modeling_df.columns:
+                                sum_val = other_products_data[var_name].sum()
+                                found = True
                         
-                        # Strategy 2: Normalized match (case-insensitive, underscore/space variations)
-                        if not found:
-                            for data_col in modeling_df.columns:
-                                col_normalized = data_col.lower().replace(' ', '_').replace('-', '_')
-                                var_normalized = var_name.lower().replace(' ', '_').replace('-', '_')
-                                if col_normalized == var_normalized:
-                                    sum_val = other_products_data[data_col].sum()
-                                    found = True
-                                    break
+                            # Strategy 2: Normalized match (case-insensitive, underscore/space variations)
+                            if not found:
+                                for data_col in modeling_df.columns:
+                                    col_normalized = data_col.lower().replace(' ', '_').replace('-', '_')
+                                    var_normalized = var_name.lower().replace(' ', '_').replace('-', '_')
+                                    if col_normalized == var_normalized:
+                                        sum_val = other_products_data[data_col].sum()
+                                        found = True
+                                        break
                         
-                        # Only add if we found matching data
-                        if found and sum_val > 0:
-                            impression_shares[beta_col] = sum_val
+                            # Only add if we found matching data
+                            if found and sum_val > 0:
+                                impression_shares[beta_col] = sum_val
                             
-                            # Create display name for this beta column
-                            display_name = var_name.replace('_', ' ').title()
-                            if 'Google Impression' in display_name or 'Google_Impression' in display_name:
+                                # Create display name for this beta column
+                                display_name = var_name.replace('_', ' ').title()
+                                if 'Google Impression' in display_name or 'Google_Impression' in display_name:
+                                    display_name = 'Google Ads Impressions'
+                                elif 'Daily Impressions Outcome Engagement' in display_name:
+                                    display_name = 'Traffic Ads Impressions'
+                                elif display_name == 'Impressions':
+                                    display_name = 'Other Products (Meta Ads)'
+                                else:
+                                    display_name = display_name.replace(' Meta Impression', ' (Meta Ads)')
+                            
+                                impression_share_display_names[beta_col] = display_name
+                    
+                        # Step 3: Calculate total impressions (only from Beta-matched variables)
+                        total_impressions = sum(impression_shares.values())
+                    
+                        # Step 4: Add impression share % to dataframe
+                        # Match by display name (since hist_df uses display names)
+                        hist_df['Impression Share %'] = 0.0
+                    
+                        for beta_col, sum_val in impression_shares.items():
+                            display_name = impression_share_display_names[beta_col]
+                            share_pct = (sum_val / total_impressions * 100) if total_impressions > 0 else 0
+                        
+                            # Find matching row in hist_df by display name
+                            for i, row in hist_df.iterrows():
+                                row_display = row['Variable'].replace('_', ' ').title()
+                                if 'Google Impression' in row_display:
+                                    row_display = 'Google Ads Impressions'
+                                elif 'Daily Impressions Outcome Engagement' in row_display:
+                                    row_display = 'Traffic Ads Impressions'
+                                elif row_display == 'Impressions':
+                                    row_display = 'Other Products (Meta Ads)'
+                                else:
+                                    row_display = row_display.replace(' Meta Impression', ' (Meta Ads)')
+                            
+                                if row_display == display_name:
+                                    hist_df.loc[i, 'Impression Share %'] = share_pct
+                                    break
+                    
+                        # Get all variables
+                        all_variables = hist_df['Variable'].tolist()
+                        impression_variables = hist_df[hist_df['Type'] == 'Impression']['Variable'].tolist()
+                        non_impression_variables = hist_df[hist_df['Type'] == 'Other']['Variable'].tolist()
+                    
+                        # Multiselect to REMOVE variables
+                        st.markdown("### 🎯 Remove Variables (Optional)")
+                        vars_to_remove = st.multiselect(
+                            "Select variables to exclude:",
+                            options=all_variables,
+                            default=non_impression_variables,
+                            help="By default, only impression variables are shown.",
+                            key="historical_remove"
+                        )
+                    
+                        # Filter dataframe
+                        filtered_hist_df = hist_df[~hist_df['Variable'].isin(vars_to_remove)].copy()
+                    
+                        if len(filtered_hist_df) > 0:
+                            # Recalculate percentages for filtered data
+                            total_filtered = filtered_hist_df['Historical Contribution'].sum()
+                            filtered_hist_df['Contribution %'] = (filtered_hist_df['Historical Contribution'] / total_filtered * 100) if total_filtered > 0 else 0
+                            filtered_hist_df['Own %'] = (filtered_hist_df['Own Contribution'] / total_filtered * 100) if total_filtered > 0 else 0
+                            filtered_hist_df['Other %'] = (filtered_hist_df['Other Contribution'] / total_filtered * 100) if total_filtered > 0 else 0
+                        
+                            # Create display names
+                            def get_display_name_hist(var_name):
+                                if 'Google Impression' in var_name:
+                                    return 'Google Ads Impressions'
+                                elif 'Daily Impressions Outcome Engagement' in var_name:
+                                    return 'Traffic Ads Impressions'
+                                elif var_name == 'Impressions':
+                                    return 'Other Products (Meta Ads)'
+                                else:
+                                    display = var_name.replace(' Meta Impression', ' (Meta Ads)')
+                                    return display
+                        
+                            filtered_hist_df['Display_Name'] = filtered_hist_df['Variable'].apply(get_display_name_hist)
+                        
+                            # Create chart with stacked revenue contributions
+                            # st.markdown("### 📊 Historical Portfolio Revenue Contribution")
+                        
+                            # Toggles for optional metrics
+                            col_toggle1, col_toggle2 = st.columns(2)
+                            with col_toggle1:
+                                show_base_budget = st.checkbox("Show Base Budget", value=False, key="show_base_budget_hist")
+                            with col_toggle2:
+                                show_opt_budget = st.checkbox("Show Optimized Budget", value=False, 
+                                                             disabled=st.session_state.optimization_result is None,
+                                                             key="show_opt_budget_hist")
+                        
+                            # Prepare data for chart with separate rows for each metric
+                            chart_data = []
+                        
+                            # Calculate total budgets for percentage calculation
+                            total_base_budget = 0
+                            total_opt_budget = 0
+                        
+                            if show_base_budget and master_df_contrib is not None:
+                                total_base_budget = master_df_contrib['base_budget'].sum()
+                        
+                            if show_opt_budget and st.session_state.optimization_result is not None:
+                                opt_result = st.session_state.optimization_result
+                                if 'optimized_budgets' in opt_result:
+                                    total_opt_budget = sum(opt_result['optimized_budgets'])
+                        
+                            for idx, row in filtered_hist_df.iterrows():
+                                display_name = row['Display_Name']
+                            
+                                # Revenue contribution row (stacked)
+                                chart_data.append({
+                                    'product': display_name,
+                                    'metric': 'Revenue %',
+                                    'own': row['Own %'],
+                                    'other': row['Other %'],
+                                    'impression': 0,
+                                    'base_budget': 0,
+                                    'opt_budget': 0
+                                })
+                            
+                                # Impression share row
+                                chart_data.append({
+                                    'product': display_name,
+                                    'metric': 'Impression %',
+                                    'own': 0,
+                                    'other': 0,
+                                    'impression': row['Impression Share %'],
+                                    'base_budget': 0,
+                                    'opt_budget': 0
+                                })
+                            
+                                # Base budget row (if enabled) - as percentage
+                                if show_base_budget and master_df_contrib is not None:
+                                    matching_budget = 0
+                                    for _, budget_row in master_df_contrib.iterrows():
+                                        item_name_lower = budget_row['item_name'].lower()
+                                        display_lower = display_name.lower()
+                                        
+                                        # Check for special cases first
+                                        if display_lower == 'google ads impressions':
+                                            if 'google' in item_name_lower and 'campaign' in item_name_lower:
+                                                matching_budget = budget_row['base_budget']
+                                                break
+                                        elif display_lower == 'traffic ads impressions':
+                                            if 'traffic' in item_name_lower:
+                                                matching_budget = budget_row['base_budget']
+                                                break
+                                        elif display_lower == 'other products (meta ads)':
+                                            if 'catalog' in item_name_lower or item_name_lower == 'other products':
+                                                matching_budget = budget_row['base_budget']
+                                                break
+                                        else:
+                                            # For product-specific items, extract product name from display name
+                                            # e.g., "Other Product (Meta Ads)" -> "other product"
+                                            product_name = display_name.replace(' (Meta Ads)', '').lower()
+                                            if product_name in item_name_lower or item_name_lower in product_name:
+                                                matching_budget = budget_row['base_budget']
+                                                break
+                                
+                                    budget_pct = (matching_budget / total_base_budget * 100) if total_base_budget > 0 else 0
+                                
+                                    chart_data.append({
+                                        'product': display_name,
+                                        'metric': 'Base Budget %',
+                                        'own': 0,
+                                        'other': 0,
+                                        'impression': 0,
+                                        'base_budget': budget_pct,
+                                        'opt_budget': 0
+                                    })
+                            
+                                # Optimized budget row (if enabled) - as percentage
+                                if show_opt_budget and st.session_state.optimization_result is not None:
+                                    opt_result = st.session_state.optimization_result
+                                    if 'optimized_budgets' in opt_result and 'item_names' in opt_result:
+                                        opt_budget_dict = dict(zip(opt_result['item_names'], opt_result['optimized_budgets']))
+                                        matching_budget = 0
+                                        for item_name, budget in opt_budget_dict.items():
+                                            item_name_lower = item_name.lower()
+                                            display_lower = display_name.lower()
+                                            
+                                            # Check for special cases first
+                                            if display_lower == 'google ads impressions':
+                                                if 'google' in item_name_lower and 'campaign' in item_name_lower:
+                                                    matching_budget = budget
+                                                    break
+                                            elif display_lower == 'traffic ads impressions':
+                                                if 'traffic' in item_name_lower:
+                                                    matching_budget = budget
+                                                    break
+                                            elif display_lower == 'other products (meta ads)':
+                                                if 'catalog' in item_name_lower or item_name_lower == 'other products':
+                                                    matching_budget = budget
+                                                    break
+                                            else:
+                                                # For product-specific items, extract product name from display name
+                                                # e.g., "Other Product (Meta Ads)" -> "other product"
+                                                product_name = display_name.replace(' (Meta Ads)', '').lower()
+                                                if product_name in item_name_lower or item_name_lower in product_name:
+                                                    matching_budget = budget
+                                                    break
+                                    
+                                        budget_pct = (matching_budget / total_opt_budget * 100) if total_opt_budget > 0 else 0
+                                    
+                                        chart_data.append({
+                                            'product': display_name,
+                                            'metric': 'Opt Budget %',
+                                            'own': 0,
+                                            'other': 0,
+                                            'impression': 0,
+                                            'base_budget': 0,
+                                            'opt_budget': budget_pct
+                                        })
+                        
+                            chart_df = pd.DataFrame(chart_data)
+                        
+                            # Use product name only for y-axis (show once per product group)
+                            chart_df['y_label'] = chart_df['product']
+                        
+                            # Create figure
+                            fig = go.Figure()
+                        
+                            # Group bars by product - each product gets all its bars together
+                            unique_products = chart_df['product'].unique()
+                        
+                            for product in unique_products:
+                                product_data = chart_df[chart_df['product'] == product]
+                            
+                                # Add Own revenue bar (base for stacking)
+                                own_value = product_data[product_data['metric'] == 'Revenue %']['own'].values
+                                if len(own_value) > 0 and own_value[0] > 0:
+                                    fig.add_trace(go.Bar(
+                                        y=[product],
+                                        x=[own_value[0]],
+                                        name='Own Revenue %',
+                                        text=f"{own_value[0]:.2f}%",
+                                        textposition='inside',
+                                        orientation='h',
+                                        marker_color='#27ae60',
+                                        legendgroup='revenue',
+                                        showlegend=(product == unique_products[0]),
+                                        offsetgroup='revenue',  # Group for stacking
+                                        base=0,  # Start from 0
+                                        hovertemplate=f'{product}<br>Own Revenue: %{{x:.2f}}%<extra></extra>'
+                                    ))
+                            
+                                # Add Other revenue bar (stacked on Own)
+                                other_value = product_data[product_data['metric'] == 'Revenue %']['other'].values
+                                own_val = own_value[0] if len(own_value) > 0 else 0
+                                if len(other_value) > 0 and other_value[0] > 0:
+                                    fig.add_trace(go.Bar(
+                                        y=[product],
+                                        x=[other_value[0]],
+                                        name='Other Revenue %',
+                                        text=f"{other_value[0]:.2f}%",
+                                        textposition='inside',
+                                        orientation='h',
+                                        marker_color='#e67e22',
+                                        legendgroup='revenue',
+                                        showlegend=(product == unique_products[0]),
+                                        offsetgroup='revenue',  # Same group for stacking
+                                        base=own_val,  # Stack on top of Own
+                                        hovertemplate=f'{product}<br>Other Revenue: %{{x:.2f}}%<extra></extra>'
+                                    ))
+                            
+                                # Add Impression bar (separate, not stacked)
+                                impression_value = product_data[product_data['metric'] == 'Impression %']['impression'].values
+                                if len(impression_value) > 0 and impression_value[0] > 0:
+                                    fig.add_trace(go.Bar(
+                                        y=[product],
+                                        x=[impression_value[0]],
+                                        name='Impression %',
+                                        text=f"{impression_value[0]:.2f}%",
+                                        textposition='auto',
+                                        orientation='h',
+                                        marker_color='#9b59b6',
+                                        legendgroup='impression',
+                                        showlegend=(product == unique_products[0]),
+                                        offsetgroup='impression',  # Different group - not stacked
+                                        hovertemplate=f'{product}<br>Impression Share: %{{x:.2f}}%<extra></extra>'
+                                    ))
+                            
+                                # Add Base Budget bar (separate, not stacked)
+                                if show_base_budget:
+                                    budget_value = product_data[product_data['metric'] == 'Base Budget %']['base_budget'].values
+                                    if len(budget_value) > 0 and budget_value[0] > 0:
+                                        fig.add_trace(go.Bar(
+                                            y=[product],
+                                            x=[budget_value[0]],
+                                            name='Base Budget %',
+                                            text=f"{budget_value[0]:.2f}%",
+                                            textposition='auto',
+                                            orientation='h',
+                                            marker_color='#3498db',
+                                            legendgroup='base_budget',
+                                            showlegend=(product == unique_products[0]),
+                                            offsetgroup='base_budget',  # Different group - not stacked
+                                            hovertemplate=f'{product}<br>Base Budget: %{{x:.2f}}%<extra></extra>'
+                                        ))
+                            
+                                # Add Optimized Budget bar (separate, not stacked)
+                                if show_opt_budget:
+                                    opt_budget_value = product_data[product_data['metric'] == 'Opt Budget %']['opt_budget'].values
+                                    if len(opt_budget_value) > 0 and opt_budget_value[0] > 0:
+                                        fig.add_trace(go.Bar(
+                                            y=[product],
+                                            x=[opt_budget_value[0]],
+                                            name='Opt Budget %',
+                                            text=f"{opt_budget_value[0]:.2f}%",
+                                            textposition='auto',
+                                            orientation='h',
+                                            marker_color='#e74c3c',
+                                            legendgroup='opt_budget',
+                                            showlegend=(product == unique_products[0]),
+                                            offsetgroup='opt_budget',  # Different group - not stacked
+                                            hovertemplate=f'{product}<br>Opt Budget: %{{x:.2f}}%<extra></extra>'
+                                        ))
+                        
+                            # Calculate dynamic height based on number of bars shown
+                            num_bars_per_product = 2  # Revenue (Own+Other), Impression
+                            if show_base_budget:
+                                num_bars_per_product += 1
+                            if show_opt_budget:
+                                num_bars_per_product += 1
+                        
+                            # More height per product when more bars are shown - BIGGER BARS
+                            height_per_product = 100 if num_bars_per_product <= 2 else 120
+                            total_height = max(len(unique_products) * height_per_product + 150, 600)
+                        
+                            fig.update_layout(
+                                height=total_height,
+                                barmode='relative',  # Stack bars with base parameter, show others separately
+                                yaxis={
+                                    'autorange': 'reversed',
+                                    'tickfont': dict(size=15),
+                                    'tickmode': 'linear'
+                                },
+                                font=dict(size=15),
+                                margin=dict(l=280, r=80, t=50, b=80),
+                                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=15)),
+                                xaxis_title="Percentage (%)",
+                                xaxis={'tickfont': dict(size=14)},
+                                bargap=0.2,  # Gap between products
+                                bargroupgap=0.1,  # Gap between bars in same product
+                                plot_bgcolor='white',
+                                paper_bgcolor='white'
+                            )
+                        
+                            container_height = min(total_height + 100, 1000)
+                            with st.container(height=container_height):
+                                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True})
+                        else:
+                            st.warning("You've removed all variables.")
+                else:
+                    st.warning("No historical contribution data available")
+                
+            except Exception as e:
+                st.error(f"Error calculating historical overview: {str(e)}")
+                import traceback
+                st.code(traceback.format_exc())
+        
+        # ========== PRODUCT-LEVEL ANALYSIS TAB ==========
+        with contrib_subtab2:
+            st.markdown("### 🔍 Product-Level Contribution Analysis")
+            st.info("Select a product to see which variables are contributing to its revenue.")
+            
+            # Get list of products
+            available_products = beta_df['Product title'].dropna().unique().tolist()
+            
+            if len(available_products) == 0:
+                st.warning("No products found in beta file")
+            else:
+                # Product selector
+                selected_product = st.selectbox(
+                    "Select Product:",
+                    options=available_products,
+                    key="product_level_selector"
+                )
+                
+                if selected_product:
+                    try:
+                        # Get product's beta row
+                        product_beta_row = beta_df[beta_df['Product title'] == selected_product].iloc[0]
+                        
+                        # Get product price
+                        product_price = product_prices.get(selected_product.lower(), 0.0)
+                        
+                        if product_price == 0:
+                            st.warning(f"⚠️ No price found for {selected_product}")
+                        
+                        # Calculate contributions for this product
+                        product_contributions = []
+                        
+                        for col in product_beta_row.index:
+                            if not col.startswith('Beta_'):
+                                continue
+                            
+                            beta_value = product_beta_row[col]
+                            if pd.isna(beta_value) or beta_value == 0:
+                                continue
+                            
+                            var_name = col.replace('Beta_', '')
+                            
+                            # Apply same display name logic as Portfolio Analysis
+                            if 'Google Impression' in var_name or 'Google_Impression' in var_name:
                                 display_name = 'Google Ads Impressions'
-                            elif 'Daily Impressions Outcome Engagement' in display_name:
+                            elif 'Daily Impressions Outcome Engagement' in var_name or 'Daily_Impressions_OUTCOME_ENGAGEMENT' in var_name:
                                 display_name = 'Traffic Ads Impressions'
-                            elif display_name == 'Impressions':
+                            elif var_name == 'Impressions':
                                 display_name = 'Other Products (Meta Ads)'
                             else:
+                                # Replace "_meta_impression" with " (Meta Ads)"
+                                display_name = var_name.replace('_', ' ').title()
                                 display_name = display_name.replace(' Meta Impression', ' (Meta Ads)')
+                                display_name = display_name.replace('Meta Impression', '(Meta Ads)')
                             
-                            impression_share_display_names[beta_col] = display_name
-                    
-                    # Step 3: Calculate total impressions (only from Beta-matched variables)
-                    total_impressions = sum(impression_shares.values())
-                    
-                    # Step 4: Add impression share % to dataframe
-                    # Match by display name (since hist_df uses display names)
-                    hist_df['Impression Share %'] = 0.0
-                    
-                    for beta_col, sum_val in impression_shares.items():
-                        display_name = impression_share_display_names[beta_col]
-                        share_pct = (sum_val / total_impressions * 100) if total_impressions > 0 else 0
-                        
-                        # Find matching row in hist_df by display name
-                        for i, row in hist_df.iterrows():
-                            row_display = row['Variable'].replace('_', ' ').title()
-                            if 'Google Impression' in row_display:
-                                row_display = 'Google Ads Impressions'
-                            elif 'Daily Impressions Outcome Engagement' in row_display:
-                                row_display = 'Traffic Ads Impressions'
-                            elif row_display == 'Impressions':
-                                row_display = 'Other Products (Meta Ads)'
+                            # Get historical mean value
+                            mean_value = None
+                            
+                            # For impressions: use "Other Products" mean
+                            if 'impression' in var_name.lower():
+                                if len(other_products_data) > 0:
+                                    if var_name in modeling_df.columns:
+                                        mean_value = other_products_data[var_name].mean()
                             else:
-                                row_display = row_display.replace(' Meta Impression', ' (Meta Ads)')
+                                # For other variables: use product-specific mean
+                                product_data = modeling_df[modeling_df[product_col].str.lower() == selected_product.lower()]
+                                if len(product_data) > 0 and var_name in modeling_df.columns:
+                                    mean_value = product_data[var_name].mean()
                             
-                            if row_display == display_name:
-                                hist_df.loc[i, 'Impression Share %'] = share_pct
-                                break
-                    
-                    # Get all variables
-                    all_variables = hist_df['Variable'].tolist()
-                    impression_variables = hist_df[hist_df['Type'] == 'Impression']['Variable'].tolist()
-                    non_impression_variables = hist_df[hist_df['Type'] == 'Other']['Variable'].tolist()
-                    
-                    # Multiselect to REMOVE variables
-                    st.markdown("### 🎯 Remove Variables (Optional)")
-                    vars_to_remove = st.multiselect(
-                        "Select variables to exclude:",
-                        options=all_variables,
-                        default=non_impression_variables,
-                        help="By default, only impression variables are shown.",
-                        key="historical_remove"
-                    )
-                    
-                    # Filter dataframe
-                    filtered_hist_df = hist_df[~hist_df['Variable'].isin(vars_to_remove)].copy()
-                    
-                    if len(filtered_hist_df) > 0:
-                        # Recalculate percentages for filtered data
-                        total_filtered = filtered_hist_df['Historical Contribution'].sum()
-                        filtered_hist_df['Contribution %'] = (filtered_hist_df['Historical Contribution'] / total_filtered * 100) if total_filtered > 0 else 0
-                        filtered_hist_df['Own %'] = (filtered_hist_df['Own Contribution'] / total_filtered * 100) if total_filtered > 0 else 0
-                        filtered_hist_df['Other %'] = (filtered_hist_df['Other Contribution'] / total_filtered * 100) if total_filtered > 0 else 0
+                            if mean_value is not None and pd.notna(mean_value):
+                                volume_contribution = beta_value * mean_value
+                                revenue_contribution = volume_contribution * product_price
+                                
+                                # Only add if there's a meaningful contribution (not zero)
+                                if abs(revenue_contribution) > 0.01:  # Skip variables with negligible contribution
+                                    product_contributions.append({
+                                        'Variable': display_name,
+                                        'Original_Variable': var_name,  # Keep original for filtering
+                                        'Beta': beta_value,
+                                        'Mean Value': mean_value,
+                                        'Volume Contribution': volume_contribution,
+                                        'Revenue Contribution ($)': revenue_contribution
+                                    })
                         
-                        # Create display names
-                        def get_display_name_hist(var_name):
-                            if 'Google Impression' in var_name:
-                                return 'Google Ads Impressions'
-                            elif 'Daily Impressions Outcome Engagement' in var_name:
-                                return 'Traffic Ads Impressions'
-                            elif var_name == 'Impressions':
-                                return 'Other Products (Meta Ads)'
+                        if len(product_contributions) > 0:
+                            # Create DataFrame
+                            contrib_df = pd.DataFrame(product_contributions)
+                            
+                            # Sort by absolute revenue contribution
+                            contrib_df['Abs_Revenue'] = contrib_df['Revenue Contribution ($)'].abs()
+                            contrib_df = contrib_df.sort_values('Abs_Revenue', ascending=False).drop('Abs_Revenue', axis=1)
+                            
+                            # Calculate percentages
+                            total_revenue = contrib_df['Revenue Contribution ($)'].sum()
+                            contrib_df['Revenue %'] = (contrib_df['Revenue Contribution ($)'] / total_revenue * 100) if total_revenue != 0 else 0
+                            
+                            # Add variable filter - by default show only impression variables
+                            st.markdown("### 🔧 Remove Variables")
+                            all_variables = contrib_df['Variable'].tolist()
+                            
+                            # By default, remove everything that doesn't have "impression" in ORIGINAL variable name
+                            default_removed = []
+                            for idx, row in contrib_df.iterrows():
+                                if 'impression' not in row['Original_Variable'].lower():
+                                    default_removed.append(row['Variable'])
+                            
+                            removed_variables = st.multiselect(
+                                "Select variables to remove from display:",
+                                options=all_variables,
+                                default=default_removed,
+                                key=f"product_var_remove_{selected_product}"
+                            )
+                            
+                            # Keep variables that are NOT in the removed list
+                            selected_variables = [var for var in all_variables if var not in removed_variables]
+                            
+                            if len(selected_variables) == 0:
+                                st.warning("⚠️ You've removed all variables. Uncheck some to display them.")
                             else:
-                                display = var_name.replace(' Meta Impression', ' (Meta Ads)')
-                                return display
-                        
-                        filtered_hist_df['Display_Name'] = filtered_hist_df['Variable'].apply(get_display_name_hist)
-                        
-                        # Create chart with stacked revenue contributions
-                        st.markdown("### 📊 Historical Portfolio Revenue Contribution")
-                        
-                        # Create subplots: Revenue (stacked) and Impression Share (separate)
-                        fig = make_subplots(
-                            rows=1, cols=2,
-                            subplot_titles=("Revenue Contribution (Own + Other)", "Impression Share"),
-                            specs=[[{"type": "bar"}, {"type": "bar"}]],
-                            column_widths=[0.5, 0.5],
-                            horizontal_spacing=0.15
-                        )
-                        
-                        # Add Own revenue contribution trace (stacked)
-                        fig.add_trace(go.Bar(
-                            y=filtered_hist_df['Display_Name'],
-                            x=filtered_hist_df['Own %'],
-                            name='Own Revenue %',
-                            text=filtered_hist_df['Own %'].apply(lambda x: f"{x:.2f}%" if x > 0 else ""),
-                            textposition='inside',
-                            orientation='h',
-                            marker_color='#27ae60',  # Green
-                            legendgroup='revenue'
-                        ), row=1, col=1)
-                        
-                        # Add Other revenue contribution trace (stacked)
-                        fig.add_trace(go.Bar(
-                            y=filtered_hist_df['Display_Name'],
-                            x=filtered_hist_df['Other %'],
-                            name='Other Revenue %',
-                            text=filtered_hist_df['Other %'].apply(lambda x: f"{x:.2f}%" if x > 0 else ""),
-                            textposition='inside',
-                            orientation='h',
-                            marker_color='#e67e22',  # Orange
-                            legendgroup='revenue'
-                        ), row=1, col=1)
-                        
-                        # Add impression share trace (separate column)
-                        fig.add_trace(go.Bar(
-                            y=filtered_hist_df['Display_Name'],
-                            x=filtered_hist_df['Impression Share %'],
-                            name='Impression Share %',
-                            text=filtered_hist_df['Impression Share %'].apply(lambda x: f"{x:.2f}%" if x > 0 else ""),
-                            textposition='auto',
-                            orientation='h',
-                            marker_color='#9b59b6',  # Purple
-                            showlegend=True,
-                            legendgroup='impression'
-                        ), row=1, col=2)
-                        
-                        fig.update_layout(
-                            height=len(filtered_hist_df) * 80,
-                            barmode='stack',  # Stack Own and Other
-                            yaxis={'autorange': 'reversed'},
-                            yaxis2={'autorange': 'reversed'},
-                            font=dict(size=15),
-                            margin=dict(l=300, r=80, t=100, b=70),
-                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=14))
-                        )
-                        
-                        # Update x-axis titles
-                        fig.update_xaxes(title_text="Revenue %", row=1, col=1)
-                        fig.update_xaxes(title_text="Impression %", row=1, col=2)
-                        
-                        with st.container(height=800):
-                            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True})
-                        
-                        # Add detailed table
-                        st.markdown("### 📋 Historical Revenue Data Table")
-                        st.dataframe(
-                            filtered_hist_df[['Display_Name', 'Own Contribution', 'Other Contribution', 'Historical Contribution', 'Own %', 'Other %', 'Contribution %', 'Impression Share %', 'Type']].rename(columns={
-                                'Display_Name': 'Variable', 
-                                'Own Contribution': 'Own Revenue ($)',
-                                'Other Contribution': 'Other Revenue ($)',
-                                'Historical Contribution': 'Total Revenue ($)'
-                            }).style.format({
-                                'Own Revenue ($)': lambda x: f"${x:,.2f}",
-                                'Other Revenue ($)': lambda x: f"${x:,.2f}",
-                                'Total Revenue ($)': lambda x: f"${x:,.2f}",
-                                'Own %': lambda x: f"{x:.2f}%",
-                                'Other %': lambda x: f"{x:.2f}%",
-                                'Contribution %': lambda x: f"{x:.2f}%",
-                                'Impression Share %': lambda x: f"{x:.2f}%"
-                            }),
-                            use_container_width=True,
-                            height=400
-                        )
-                        
-                        # Add debug expander for impression share calculation
-                        with st.expander("🔍 DEBUG: Impression Share Calculation Details"):
-                            st.markdown("### Step-by-Step Calculation")
-                            
-                            st.markdown(f"**Step 1:** Found {len(beta_impression_cols)} Beta impression columns in beta file")
-                            for beta_col in beta_impression_cols[:10]:
-                                st.text(f"  • {beta_col}")
-                            if len(beta_impression_cols) > 10:
-                                st.text(f"  ... and {len(beta_impression_cols) - 10} more")
-                            
-                            st.markdown(f"**Step 2:** Filtered modeling data to 'Other Products' → {len(other_products_data)} rows")
-                            
-                            st.markdown(f"**Step 3:** Matched {len(impression_shares)} Beta columns with modeling data:")
-                            for beta_col, sum_val in impression_shares.items():
-                                display_name = impression_share_display_names[beta_col]
-                                st.text(f"  • {beta_col} → {display_name}: {sum_val:,.0f} impressions")
-                            
-                            st.markdown(f"**Step 4:** Total Impressions (sum of matched): {total_impressions:,.0f}")
-                            
-                            st.markdown(f"**Step 5:** Calculated Impression Share %:")
-                            for beta_col, sum_val in impression_shares.items():
-                                display_name = impression_share_display_names[beta_col]
-                                share_pct = (sum_val / total_impressions * 100) if total_impressions > 0 else 0
-                                st.text(f"  • {display_name}: ({sum_val:,.0f} / {total_impressions:,.0f}) × 100 = {share_pct:.2f}%")
-                            
-                            if len(impression_shares) == 0:
-                                st.error("❌ No impression variables matched! Check column name matching logic.")
-                            elif total_impressions == 0:
-                                st.error("❌ Total impressions is 0! Check if 'Other Products' data has values.")
-                            else:
-                                st.success(f"✅ Successfully calculated impression shares for {len(impression_shares)} variables")
-                    else:
-                        st.warning("You've removed all variables.")
-            else:
-                st.warning("No historical contribution data available")
-                
-        except Exception as e:
-            st.error(f"Error calculating historical overview: {str(e)}")
-            import traceback
-            st.code(traceback.format_exc())
+                                # Filter dataframe based on selection
+                                filtered_contrib_df = contrib_df[contrib_df['Variable'].isin(selected_variables)].copy()
+                                
+                                # Recalculate percentages after filtering
+                                filtered_total_revenue = filtered_contrib_df['Revenue Contribution ($)'].sum()
+                                filtered_contrib_df['Revenue %'] = (filtered_contrib_df['Revenue Contribution ($)'] / filtered_total_revenue * 100) if filtered_total_revenue != 0 else 0
+                                
+                                # Display chart
+                                st.markdown("### 📊 Variable Contributions")
+                                
+                                fig = go.Figure()
+                                
+                                fig.add_trace(go.Bar(
+                                    y=filtered_contrib_df['Variable'],
+                                    x=filtered_contrib_df['Revenue %'],
+                                    orientation='h',
+                                    marker_color=['#27ae60' if x > 0 else '#e74c3c' for x in filtered_contrib_df['Revenue Contribution ($)']],
+                                    text=filtered_contrib_df['Revenue %'].apply(lambda x: f"{x:.2f}%"),
+                                    textposition='auto',
+                                    hovertemplate='%{y}<br>Revenue: %{x:.2f}%<extra></extra>'
+                                ))
+                                
+                                fig.update_layout(
+                                    height=max(len(filtered_contrib_df) * 40, 400),
+                                    yaxis={'autorange': 'reversed'},
+                                    xaxis_title="Revenue Contribution %",
+                                    font=dict(size=13),
+                                    margin=dict(l=250, r=80, t=50, b=70),
+                                    plot_bgcolor='white'
+                                )
+                                
+                                st.plotly_chart(fig, use_container_width=True)
+                        else:
+                            st.warning(f"No contributions found for {selected_product}")
+                    
+                    except Exception as e:
+                        st.error(f"Error calculating product contributions: {str(e)}")
+                        import traceback
+                        st.code(traceback.format_exc())
 
 
 if __name__ == "__main__":
